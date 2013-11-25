@@ -238,36 +238,10 @@ def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
 	createEvent(map)
 }
 
-/*/user
-def userupdate() {
-	def result = secure(zwave.userCodeV1.usersNumberGet())
-    log.debug "User $result"
-    result
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.usercodev1.UsersNumberReport cmd) {
-	def map = [ name: "user", unit: "" ]
-		map.value = cmd.supportedUsers
-	createEvent(map)
-    log.debug "User Report $cmd.supportedUsers"
-}*/
-
 def usercodechange(user, code) {
     log.debug "Set $code for User $user"
     secure(zwave.userCodeV1.userCodeSet(userIdentifier: 3, userIdStatus: 1, code: 4587))
 }
-
-def userrefresh() {
-    secure(zwave.userCodeV1.userCodeGet(userIdentifier: 3))
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.usercodev1.UserCodeReport cmd) {
-	def map = [ name: "user", unit: "" ]
-		map.value = cmd.userIdentifier
-	createEvent(map)
-    log.debug "User Report $cmd.userIdentifier"
-}
-
 
 def zwaveEvent(physicalgraph.zwave.Command cmd) {
 	createEvent(displayed: false, descriptionText: "$device.displayName: $cmd")
@@ -293,23 +267,23 @@ def unlockwtimeout() {
 }
 
 def refresh() {
-	def result = secure(zwave.doorLockV1.doorLockOperationGet())
-	if (state.assoc) {
+	def result = [secure(zwave.doorLockV1.doorLockOperationGet())]
+	if (state.assoc == zwaveHubNodeId) {
 		//log.debug "$device.displayName is associated to ${state.assoc}"
 	} else if (!state.associationQuery) {
 		log.debug "checking association"
-		result = secureSequence([
-			zwave.doorLockV1.doorLockOperationGet(),
-			zwave.associationV1.associationGet(groupingIdentifier:1)], 6000)
+		result << "delay 4200"
+		result << zwave.associationV1.associationGet(groupingIdentifier:2).format()  // old Schlage locks use group 2 and don't secure the Association CC
+		result << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
 		state.associationQuery = new Date().time
-	} else if (state.associationQuery.toLong() - new Date().time > 9000) {
+	} else if (new Date().time - state.associationQuery.toLong() > 9000) {
 		log.debug "setting association"
-		state.associationQuery = null
-		result = secureSequence([
-			zwave.doorLockV1.doorLockOperationGet(),
-			zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId),
-			zwave.associationV1.associationGet(groupingIdentifier:1)
-		])
+		result << "delay 6000"
+		result << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
+		result << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+		result << zwave.associationV1.associationGet(groupingIdentifier:2).format()
+		result << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
+		state.associationQuery = new Date().time
 	}
 	result
 }
@@ -321,6 +295,6 @@ def secure(physicalgraph.zwave.Command cmd) {
 	zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
 }
 
-def secureSequence(commands, delay=2200) {
+def secureSequence(commands, delay=4200) {
 	delayBetween(commands.collect{ secure(it) }, delay)
 }
