@@ -238,9 +238,9 @@ def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
 	createEvent(map)
 }
 
-def usercodechange(user, code) {
-    log.debug "Set $code for User $user"
-    secure(zwave.userCodeV1.userCodeSet(userIdentifier: 3, userIdStatus: 1, code: 4587))
+def usercodechange(user1, code1) {
+    log.debug "Set $code1 for User $user1"
+    secure(zwave.userCodeV1.userCodeSet(userIdentifier: user1, userIdStatus: 1, code: code1))
 }
 
 def zwaveEvent(physicalgraph.zwave.Command cmd) {
