@@ -42,9 +42,6 @@ metadata {
 		valueTile("battery", "device.battery", inactiveLabel: false, decoration: "flat") {
 			state "battery", label:'${currentValue}% battery', action:"batteryupdate", unit:""
 		}
-        valueTile("code", "device.code", inactiveLabel: false, decoration: "flat") {
-			state "code", label:'${currentValue} code', unit:""
-		}
 		standardTile("refresh", "device.lock", inactiveLabel: false, decoration: "flat") {
 			state "default", label:'', action:"refresh.refresh", icon:"st.secondary.refresh"
 		}
@@ -152,7 +149,6 @@ def zwaveEvent(physicalgraph.zwave.commands.alarmv2.AlarmReport cmd) {
 			map = [ name: "lock", value: "locked" ]
             if(cmd.alarmLevel) {
 				map.descriptionText = "$device.displayName Secured by User ${cmd.alarmLevel} at Keypad"
-                map = [ name: "code", value: ${cmd.alarmLevel} ]
             }
 			break
 		case 19:
