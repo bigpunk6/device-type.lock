@@ -40,7 +40,10 @@ metadata {
 			state "default", label:'unlock', action:"lock.unlock", icon:"st.locks.lock.unlocked", nextState:"unlocking"
 		}
 		valueTile("battery", "device.battery", inactiveLabel: false, decoration: "flat") {
-			state "battery", label:'${currentValue}% battery', action:"batteryupdate", unit:""
+            state "battery", label:'${currentValue}% battery', action:"batteryupdate", unit:""
+        }
+        valueTile("usercode", "device.usercode", inactiveLabel: false, decoration: "flat") {
+			state "usercode", label:'${currentValue}', unit:""
 		}
 		standardTile("refresh", "device.lock", inactiveLabel: false, decoration: "flat") {
 			state "default", label:'', action:"refresh.refresh", icon:"st.secondary.refresh"
@@ -50,7 +53,7 @@ metadata {
 		}
 
 		main "toggle"
-		details(["toggle", "lock", "unlock", "battery", "code", "configure", "refresh"])
+		details(["toggle", "lock", "unlock", "battery", "usercode", "configure", "refresh"])
 	}
 }
 
@@ -62,17 +65,18 @@ def parse(String description) {
 	if (description.startsWith("Err")) {
 	    result = createEvent(descriptionText:description, displayed:true)
 	} else {
-		def cmd = zwave.parse(description, [ 0x98: 1 ])
+		def cmd = zwave.parse(description, [ 0x98: 1])
 		if (cmd) {
 			result = zwaveEvent(cmd)
 		}
 	}
 	log.debug "\"$description\" parsed to ${result.inspect()}"
+    log.debug "Parse result $result"
 	result
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
-	def encapsulatedCommand = cmd.encapsulatedCommand([0x62: 1, 0x71: 2, 0x80:1, 0x85: 2])
+	def encapsulatedCommand = cmd.encapsulatedCommand([0x20: 1,0x62: 1, 0x63: 1, 0x70: 1, 0x71: 2, 0x75: 1, 0x80:1, 0x85: 2, 0x4E: 2, 0x4C: 1, 0x8B: 1, 0x5D: 2])
 	log.debug "encapsulated: $encapsulatedCommand"
 	if (encapsulatedCommand) {
 		zwaveEvent(encapsulatedCommand)
@@ -149,6 +153,7 @@ def zwaveEvent(physicalgraph.zwave.commands.alarmv2.AlarmReport cmd) {
 			map = [ name: "lock", value: "locked" ]
             if(cmd.alarmLevel) {
 				map.descriptionText = "$device.displayName Secured by User ${cmd.alarmLevel} at Keypad"
+                map = [ name: "code", value: ${cmd.alarmLevel} ]
             }
 			break
 		case 19:
@@ -188,6 +193,10 @@ def zwaveEvent(physicalgraph.zwave.commands.alarmv2.AlarmReport cmd) {
         case 32:
 			map = [ name: "lock", value: "unknown" ]
 				map.descriptionText = "All User Codes deleted from $device.displayName"
+			break
+        case 33:
+			map = [ name: "lock", value: "unknown" ]
+				map.descriptionText = "User ${cmd.alarmLevel} deleted from $device.displayName"
 			break
        case 112:
 			map = [ name: "lock", value: "unknown" ]
@@ -253,32 +262,76 @@ def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
 	createEvent(map)
 }
 
-def usercodechange(user1, code1) {
+//User
+def usercodechange(user1, code1, idstatus1) {
     log.debug "Set $code1 for User $user1"
-    secure(zwave.userCodeV1.userCodeSet(userIdentifier: user1, userIdStatus: 1, code: code1))
+    log.debug "Set User ID Status to $idstatus1"
+    secureSequence([
+        zwave.userCodeV1.userCodeSet(userIdentifier: user1, userIdStatus: idstatus1, code: code1),
+        zwave.userCodeV1.userCodeGet(userIdentifier: user1)
+    ], 4200)
 }
 
+def zwaveEvent(physicalgraph.zwave.commands.usercodev1.UserCodeReport cmd) {
+    log.debug "$cmd"
+    def map = [ name: "usercode" ]
+    map.value = cmd.code
+    createEvent(map)
+}
+
+//Configuration
+def configupdate() {
+    secure(zwave.configurationV1.configurationGet(parameterNumber: 1))
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.configurationv1.ConfigurationReport cmd) {
+    log.debug "$cmd"
+    def map = [ name: "config", value:  cmd.configurationValue]
+    if (cmd.configurationValue) {
+        switch(cmd.configurationValue) {
+			case "[1]":
+				map.descriptionText = "User $cmd.parameterNumber is Type: Owner (Default)"
+                log.debug "Owner"
+				break
+			case "[3]":
+				map.descriptionText = "User $cmd.parameterNumber is Type: Guest (Required for Year Day Schedules)"
+				break
+            case "[4]":
+				map.descriptionText = "User $cmd.parameterNumber is Type: Worker (Required for Week Day Schedules)"
+				break
+            case "[255]":
+				map.descriptionText = "User $cmd.parameterNumber not found"
+				break
+            default:
+			    map = [ displayed: false, descriptionText: "$device.displayName: $cmd" ]
+            }
+    }
+    createEvent(map)
+}
+
+
 def zwaveEvent(physicalgraph.zwave.Command cmd) {
-	createEvent(displayed: false, descriptionText: "$device.displayName: $cmd")
+    log.warn "Unexpected zwave command $cmd"
+    createEvent(displayed: false, descriptionText: "$device.displayName: $cmd")
 }
 
 def lockAndCheck(doorLockMode) {
-	secureSequence([
-		zwave.doorLockV1.doorLockOperationSet(doorLockMode: doorLockMode),
-		zwave.doorLockV1.doorLockOperationGet()
-	], 4200)
+    secureSequence([
+        zwave.doorLockV1.doorLockOperationSet(doorLockMode: doorLockMode),
+        zwave.doorLockV1.doorLockOperationGet()
+    ], 4200)
 }
 
 def lock() {
-	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
+    lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
 }
 
 def unlock() {
-	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
+    lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
 }
 
 def unlockwtimeout() {
-	lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED_WITH_TIMEOUT)
+    lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED_WITH_TIMEOUT)
 }
 
 def refresh() {
@@ -307,7 +360,9 @@ def updated() {
 }
 
 def secure(physicalgraph.zwave.Command cmd) {
-	zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
+    def result = zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
+    log.debug "Result $result"
+    result
 }
 
 def secureSequence(commands, delay=4200) {
